@@ -48,10 +48,16 @@ src/
 
 ### 上流との差分
 
-`engine.js` は上流の `source/src/{quality,math,shaders,world}.js` を
-そのまま連結したものです。変更点は先頭の品質レベルだけです
-（上流は `localStorage` / `matchMedia` から決めていましたが、
-ここでは Worker が `globalThis.__ABYSSAL_QUALITY__` で渡します）。
+`engine.js` は上流の `source/src/{quality,math,shaders,world}.js`
+（[a596354](https://github.com/Noniv/abyssal-garden/commit/a596354)）を
+そのまま連結したものです。変更点は 2 つだけです。
+
+1. 先頭の品質レベル（上流は `localStorage` / `matchMedia` から決めていましたが、
+   ここでは Worker が `globalThis.__ABYSSAL_QUALITY__` で渡します）
+2. `W_POST` のフラグメントシェーダで、XR のアトラス（左右の目を横並び）に
+   描くときの x オフセットを `g.mis.w` から引くようにした
+
+それ以外の WGSL とワールド生成は上流のままです。
 
 `renderer.js` は `main.js` から次のものを置き換えています。
 
@@ -106,6 +112,10 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   実機で確認するときは XRift にアップロードして Enter VR してください。
 - **効果音は入っていません。** 上流の Web Audio の音響（`source/src/audio.js`）は
   移植していません。
+- **Worker の URL は絶対パス**（`/abyssal.worker-<hash>.js`）です。
+  `@webxr-jp/webgpu-view` の `?worker` import がそう出力するためで、
+  ワールドをサブパスで配信する場合は `vite.config.ts` の `base` を合わせてください
+  （合わないと背景だけが出ません。メインのワールドは動きます）。
 - 上流の「動的解像度」の代わりに、GPU 時間を見て描画距離 `det` を
   0.45〜1.0 で自動調整します（`[abyssal] gpu ... / draw distance ...`）。
   手元の Mac（Apple Silicon, Chrome）では High / 1280x938 で
