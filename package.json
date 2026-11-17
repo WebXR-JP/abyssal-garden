@@ -1,7 +1,7 @@
 {
   "name": "@xrift/abyssal-garden",
   "version": "0.1.0",
-  "description": "XRift world template for creating WebXR experiences with React Three Fiber and physics simulation",
+  "description": "Abyssal Garden (Noniv/abyssal-garden, MIT) as an XRift world: a raw WebGPU underwater scene rendered in a Worker and shown with @webxr-jp/webgpu-view",
   "type": "module",
   "main": "./dist/remoteEntry.js",
   "module": "./dist/remoteEntry.js",
