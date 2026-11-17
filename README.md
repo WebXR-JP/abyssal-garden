@@ -117,9 +117,10 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   ワールドをサブパスで配信する場合は `vite.config.ts` の `base` を合わせてください
   （合わないと背景だけが出ません。メインのワールドは動きます）。
 - 上流の「動的解像度」の代わりに、GPU 時間を見て描画距離 `det` を
-  0.45〜1.0 で自動調整します（`[abyssal] gpu ... / draw distance ...`）。
+  0.5〜1.0 で自動調整します（`[abyssal] gpu ... / draw distance ...`）。
   手元の Mac（Apple Silicon, Chrome）では High / 1280x938 で
-  `det` が 0.70 に落ち着き、**60 fps**（GPU 13 ms）でした。
+  `det` が 0.7〜0.8 に落ち着き、**60 fps**（GPU 13〜16 ms）でした。
+  GPU 時間はマシンの負荷で大きく変わるので、`?profile=1` で確認してください。
 
 ## ライセンス
 

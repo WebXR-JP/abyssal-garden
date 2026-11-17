@@ -645,8 +645,8 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
       perfSum += F[19]; perfFrames++
       if (perfFrames >= 60) {
         const avg = perfSum / perfFrames
-        if (avg > 15) det = max(0.45, det - 0.1)
-        else if (avg < 9) det = min(1, det + 0.05)
+        if (avg > 17) det = max(0.5, det - 0.08)
+        else if (avg < 11) det = min(1, det + 0.04)
         perfSum = 0; perfFrames = 0
       }
     }
