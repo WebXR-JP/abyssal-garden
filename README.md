@@ -37,11 +37,13 @@ src/
 ├── abyssal/
 │   ├── engine.js         # 上流の quality / math / shaders / world をまとめたもの
 │   ├── renderer.js       # 上流の main.js を Worker 用に書き換えたもの
+│   ├── audio.js          # 上流の Web Audio アンビエンス（メインスレッド用）
 │   └── LICENSE-abyssal   # 上流の MIT ライセンス
 ├── worker/
 │   └── abyssal.worker.ts # webgpu-view の Worker プロトコル（init/resize/frame/dispose）
 ├── components/
 │   ├── AbyssalBackdrop/  # GpuBackdrop のラッパー
+│   ├── AbyssalAudio/     # 効果音の再生と音量 HUD
 │   └── VrLocomotion/     # ローカル開発用の VR 移動（本番は XRift 側が動かす）
 ├── World.tsx             # スポーン・見えない床・読み込み表示
 └── dev.tsx               # ローカル開発用エントリ
@@ -73,7 +75,7 @@ src/
 | 1 視点 | 1〜2 視点（XR は左右を横並びに描く） |
 | 動的解像度 | 描画距離 `det` の自動調整（画像サイズはホストが決めるため） |
 | 泳ぎの当たり判定 | カメラを岩から押し出すだけ（歩行は XRift 側） |
-| 効果音（Web Audio） | 未移植（下記「制限」参照） |
+| 効果音（Web Audio） | メインスレッドで鳴らす（`src/abyssal/audio.js`、手続き生成で音源ファイルなし）。音量 HUD を追加 |
 
 ワールド生成・シェーダ・パス（影・光の筋・ブルーム・水面）は上流のままです。
 
@@ -107,6 +109,7 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 | `?profile=1` | 1 秒ごとの描画統計（`[abyssal] stats {...}`） |
 | `?off=1` | 背景を止める（切り分け用。ワールド生成は走る） |
 | `?stereo=1` | モニタでも左右 2 視点（アトラスの確認用） |
+| `?audio=0` | 効果音を鳴らさない（切り分け用） |
 | `?vrDebug=1` | dev の VR rig を `window.__vrRig` で外から動かせる（姿勢の切り分け用） |
 
 ## VR の操作
@@ -136,6 +139,23 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   ローカル姿勢として持つ専用カメラを渡しています。`?debug=1` の
   `window.__abyssalBackdrop.correctionDeg` が常に小さい値なら一致しています。
 
+## 音量 HUD
+
+画面下中央に、水中音の音量 HUD が浮かびます（頭の姿勢に追従し、視線の少し下）。
+
+| 操作 | 動作 |
+| --- | --- |
+| スピーカー | ミュート / 解除（`M` キーでも可） |
+| − / ＋ | 10% ずつ変更 |
+| 10 段のバー | 押した段の音量へ（触るとミュート解除） |
+
+- 見た目は文字なしの CanvasTexture 1 枚（スピーカー・−・バー・＋）。当たり判定は
+  `Interactable` で、XRift のプラットフォームが VR コントローラーのレイも拾います。
+- 音量とミュートは `localStorage`（`abyssal-garden:volume` / `abyssal-garden:muted`）に
+  残るので、入り直しても同じ設定で始まります。
+- パネルの幅は横方向の視野に合わせて縮みます（縦長のウィンドウでも画面を覆いません）。
+- `?audio=0` のときは音も HUD も出ません。
+
 ## 制限
 
 - **視差は出ません。** `GpuBackdrop` は「カメラに追従する背景」なので、
@@ -157,8 +177,15 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   three の `FSR1Node` は r184+ の TSL / WebGPURenderer 専用なので使えず、
   EASU の部分だけを GLSL に移植したものです（`?fsr=0` でバイリニアに戻せる）。
   RCAS（2 パス目のシャープ）は入っていないので、輪郭の立ち方は EASU 単体のぶんです。
-- **効果音は入っていません。** 上流の Web Audio の音響（`source/src/audio.js`）は
-  移植していません。
+- **効果音は上流のまま鳴ります。** `source/src/audio.js` をメインスレッド用に
+  移植した `src/abyssal/audio.js` が、AudioBuffer をその場で作る手続き生成の
+  水中音（ランブル・水面・水を切る音・ドローン・泡・チャイム・遠いクジラ）を
+  鳴らします。音源ファイルは無いので `public/` も通信も増えません。
+  ブラウザの自動再生制限があるため、`AudioContext` は最初のクリック / キー /
+  タッチ（VR は入室）で作って再開します。`M` キーでミュート、`?audio=0` で無効。
+  水中の視点はメインスレッドのカメラ位置を 10 Hz で渡していて（Worker の `F`
+  配列の代わり）、移動が速いと水を切る音、深いと水面の音が変わります。音量は
+  上記「音量 HUD」と `M` キーで調整できます。
 - **Worker は blob（`?worker&inline`）で起動します。** XRift はワールドを
   `assets.xrift.net`、ページを `app.xrift.net` で配信するため、別ファイルの Worker は
   「別オリジン」として `SecurityError` になります（URL をサブパスに合わせても同じ）。

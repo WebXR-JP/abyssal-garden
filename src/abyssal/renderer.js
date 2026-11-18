@@ -6,7 +6,8 @@
 // camera from the host (XRift / React Three Fiber) instead of pointer lock.
 //
 // What changed:
-// - the page (menu, loading bar, pointer lock, touch, HUD, audio) is gone
+// - the page (menu, loading bar, pointer lock, touch, HUD) is gone; the audio
+//   moved to the main thread (src/abyssal/audio.js, see AbyssalAudio)
 // - the camera comes from the view/projection matrices the main thread sends
 // - rendering is driven by a `frame` message instead of requestAnimationFrame
 // - one frame can hold several views (XR: left and right eye side by side)

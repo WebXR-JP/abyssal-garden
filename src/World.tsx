@@ -2,6 +2,7 @@ import { Html } from '@react-three/drei'
 import { CuboidCollider, RigidBody } from '@react-three/rapier'
 import { SpawnPoint } from '@xrift/world-components'
 import { useCallback, useState } from 'react'
+import { AbyssalAudio } from './components/AbyssalAudio'
 import { AbyssalBackdrop } from './components/AbyssalBackdrop'
 
 export interface WorldProps {
@@ -39,6 +40,9 @@ export const World: React.FC<WorldProps> = ({ position = [0, 0, 0], scale = 1 })
 
       {/* ========== WebGPU: Abyssal Garden ========== */}
       <AbyssalBackdrop onReady={handleReady} onError={handleError} />
+
+      {/* ========== 効果音（上流の Web Audio アンビエンス） ========== */}
+      <AbyssalAudio visible={ready} />
 
       {/* ========== 見えない床（歩けるようにするため） ========== */}
       <RigidBody type="fixed" colliders={false} restitution={0} friction={0.2}>
