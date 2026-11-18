@@ -28,6 +28,15 @@ export const World: React.FC<WorldProps> = ({ position = [0, 0, 0], scale = 1 })
       {/* WebGPU が使えない環境でも真っ暗にならないように */}
       <color attach="background" args={['#03131c']} />
 
+      {/* ========== アバター用のライト ========== */}
+      {/* 景色は WebGPU の Worker が自前で陰影を付けて描くため、ここのライトは
+          アバター（XRift が読み込む glTF）にしか当たらない。
+          向きだけが意味を持つので、プレイヤーがどこへ動いても同じ当たり方になる。 */}
+      <ambientLight intensity={0.9} color="#8fd8e8" />
+      <directionalLight position={[4, 8, 6]} intensity={2.2} color="#e8fbff" />
+      {/* 影側が真っ黒にならないよう、逆側から弱いフィルを足す */}
+      <directionalLight position={[-6, 3, -4]} intensity={0.7} color="#6fd0e8" />
+
       {/* ========== WebGPU: Abyssal Garden ========== */}
       <AbyssalBackdrop onReady={handleReady} onError={handleError} />
 
