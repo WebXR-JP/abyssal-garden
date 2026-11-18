@@ -993,7 +993,7 @@ fn sat3(x: vec3f) -> vec3f { return clamp(x, vec3f(0.), vec3f(1.)); }
   let uv = (fc.xy - vec2f(g.mis.w, 0.)) * g.res.zw;
   let zf = g.fwd.w / max(textureLoad(tDp, px, 0), 1e-6);
   // depth-aware upsample of the half-res shafts
-  let h = fc.xy * .5 - .5; let b = floor(h); let f = h - b; let bi = vec2i(b);
+  let h = vec2f(px) * .5 - .5; let b = floor(h); let f = h - b; let bi = vec2i(b);
   let mx = vec2i(textureDimensions(tR)) - 1;
   var acc = vec3f(0.); var ws = 0.;
   for (var k = 0; k < 4; k++) {
