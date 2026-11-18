@@ -102,6 +102,7 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 | `?quality=0` / `1` / `2` | High / Medium / Low（未指定は端末から自動） |
 | `?maxWidth=960` | 1 視点ぶんの描画解像度の上限（既定 モニタ 1280 / XR 640） |
 | `?maxFps=30` | Worker の最大描画頻度（既定 60） |
+| `?fsr=0` | XR の拡大を FSR1 EASU からバイリニアに戻す（既定は EASU） |
 | `?debug=1` | ready / fps をコンソールに出す |
 | `?profile=1` | 1 秒ごとの描画統計（`[abyssal] stats {...}`） |
 | `?off=1` | 背景を止める（切り分け用。ワールド生成は走る） |
@@ -150,6 +151,12 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   320/eye で 25〜30fps、描画距離 `det` が 0.5 まで落ちた状態での値です。
   XR のフレーム間隔は「Worker の GPU 時間＋ImageBitmap の受け渡し」で決まり、
   背景を止めると 72fps で回るので、重さはほぼ背景側です。
+- **XR の拡大は FSR1 の EASU。** 640px/eye を目の解像度（2.5〜3.4 倍）まで拡大する
+  ときにバイリニアだと輪郭がぼやけるので、`ReprojectedBackdrop` のフラグメント
+  シェーダで EASU（12 タップのエッジ適応アップサンプル）をかけています。
+  three の `FSR1Node` は r184+ の TSL / WebGPURenderer 専用なので使えず、
+  EASU の部分だけを GLSL に移植したものです（`?fsr=0` でバイリニアに戻せる）。
+  RCAS（2 パス目のシャープ）は入っていないので、輪郭の立ち方は EASU 単体のぶんです。
 - **効果音は入っていません。** 上流の Web Audio の音響（`source/src/audio.js`）は
   移植していません。
 - **Worker は blob（`?worker&inline`）で起動します。** XRift はワールドを

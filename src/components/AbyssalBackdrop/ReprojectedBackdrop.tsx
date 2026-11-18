@@ -9,6 +9,7 @@ import {
   PerspectiveCamera,
   PlaneGeometry,
   ShaderMaterial,
+  Vector2,
   Vector3,
   Vector4,
 } from 'three'
@@ -43,7 +44,14 @@ varying vec2 vUv;
 
 uniform sampler2D uColor;
 uniform float uEyeCount;
+// XR で目ごとに描いている（タイルを選ぶ）
+uniform float uEyeMode;
+// 再投影している（描画時の姿勢が記録済み）
 uniform float uPerEye;
+// EASU で拡大する
+uniform float uEasu;
+// 1 視点ぶんのテクセルサイズ
+uniform vec2 uEyeTexel;
 uniform vec3 uHeadPosition;
 // 描画時のカメラ基底（view 行列）と投影係数 (sx, sy, ox, oy)
 uniform mat4 uPrevView0;
@@ -62,49 +70,190 @@ vec3 linearToSRGB(vec3 color) {
   );
 }
 
+/** 目タイル内のローカル uv をアトラスの uv にして 1 タップ。タイル外は端で止める */
+vec3 sampleEye(vec2 localUv, float eye) {
+  vec2 t = clamp(localUv, 0.5 * uEyeTexel, 1.0 - 0.5 * uEyeTexel);
+  return texture2D(uColor, vec2((eye + t.x) / uEyeCount, t.y)).rgb;
+}
+
+float luma(vec3 c) {
+  return c.r * 0.5 + c.g + c.b * 0.5;
+}
+
+/** EASU: 4 象限ぶんの勾配（方向と長さ）を足す */
+void accumulateEdge(inout vec2 dir, inout float len, float w, float aL, float bL, float cL, float dL, float eL) {
+  float dc = dL - cL;
+  float cb = cL - bL;
+  float dirX = dL - bL;
+  float lenX = max(abs(dc), abs(cb));
+  float sLenX = clamp(abs(dirX) / max(lenX, 1.0 / 65536.0), 0.0, 1.0);
+  dir.x += dirX * w;
+  len += sLenX * sLenX * w;
+
+  float ec = eL - cL;
+  float ca = cL - aL;
+  float dirY = eL - aL;
+  float lenY = max(abs(ec), abs(ca));
+  float sLenY = clamp(abs(dirY) / max(lenY, 1.0 / 65536.0), 0.0, 1.0);
+  dir.y += dirY * w;
+  len += sLenY * sLenY * w;
+}
+
+/** EASU: 近似 Lanczos2 の重みで 1 タップ足す */
+void accumulateTap(inout vec3 acc, inout float aw, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 color) {
+  float vx = off.x * dir.x + off.y * dir.y;
+  float vy = -off.x * dir.y + off.y * dir.x;
+  float sx = vx * len2.x;
+  float sy = vy * len2.y;
+  float d2 = min(sx * sx + sy * sy, clp);
+
+  float wB = d2 * (2.0 / 5.0) - 1.0;
+  float wA = d2 * lob - 1.0;
+  float w = (wB * wB * (25.0 / 16.0) - (25.0 / 16.0 - 1.0)) * (wA * wA);
+
+  acc += color * w;
+  aw += w;
+}
+
+/**
+ * FSR1 EASU（AMD FidelityFX FSR1, MIT）の 12 タップ実装。
+ * three の FSR1Node（r184+, TSL / WebGPURenderer 専用）の EASU を GLSL に写したもの。
+ * uv は目タイル内の [0,1]、texel は 1/解像度。タイル外は sampleEye が端で止める。
+ *
+ *   b c
+ * e f g h
+ * i j k l
+ *   n o
+ */
+vec3 easu(vec2 uv, float eye, vec2 texel) {
+  // テクセル中心が整数になる座標系（FSR1 の ip に相当）
+  vec2 pp = uv / texel - 0.5;
+  vec2 f = fract(pp);
+  vec2 o = -f;
+
+  vec3 sB = sampleEye(uv + (vec2(0.0, -1.0) + o) * texel, eye);
+  vec3 sC = sampleEye(uv + (vec2(1.0, -1.0) + o) * texel, eye);
+  vec3 sE = sampleEye(uv + (vec2(-1.0, 0.0) + o) * texel, eye);
+  vec3 sF = sampleEye(uv + (vec2(0.0, 0.0) + o) * texel, eye);
+  vec3 sG = sampleEye(uv + (vec2(1.0, 0.0) + o) * texel, eye);
+  vec3 sH = sampleEye(uv + (vec2(2.0, 0.0) + o) * texel, eye);
+  vec3 sI = sampleEye(uv + (vec2(-1.0, 1.0) + o) * texel, eye);
+  vec3 sJ = sampleEye(uv + (vec2(0.0, 1.0) + o) * texel, eye);
+  vec3 sK = sampleEye(uv + (vec2(1.0, 1.0) + o) * texel, eye);
+  vec3 sL = sampleEye(uv + (vec2(2.0, 1.0) + o) * texel, eye);
+  vec3 sN = sampleEye(uv + (vec2(0.0, 2.0) + o) * texel, eye);
+  vec3 sO = sampleEye(uv + (vec2(1.0, 2.0) + o) * texel, eye);
+
+  float bL = luma(sB), cL = luma(sC);
+  float eL = luma(sE), fL = luma(sF), gL = luma(sG), hL = luma(sH);
+  float iL = luma(sI), jL = luma(sJ), kL = luma(sK), lL = luma(sL);
+  float nL = luma(sN), oL = luma(sO);
+
+  vec2 dir = vec2(0.0);
+  float len = 0.0;
+
+  float w0 = (1.0 - f.x) * (1.0 - f.y);
+  float w1 = f.x * (1.0 - f.y);
+  float w2 = (1.0 - f.x) * f.y;
+  float w3 = f.x * f.y;
+
+  accumulateEdge(dir, len, w0, bL, eL, fL, gL, jL);
+  accumulateEdge(dir, len, w1, cL, fL, gL, hL, kL);
+  accumulateEdge(dir, len, w2, fL, iL, jL, kL, nL);
+  accumulateEdge(dir, len, w3, gL, jL, kL, lL, oL);
+
+  // 勾配が無視できるときは (1, 0) に倒す
+  float dirSq = dot(dir, dir);
+  bool zro = dirSq < 1.0 / 32768.0;
+  float rDirLen = inversesqrt(max(dirSq, 1.0 / 32768.0));
+  dir.x = zro ? 1.0 : dir.x;
+  dir *= zro ? 1.0 : rDirLen;
+
+  // エッジの強さでカーネルを変形する
+  len *= 0.5;
+  len *= len;
+
+  // 軸に揃ったエッジで 1.0、斜めで sqrt(2)
+  float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+  vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - len * 0.5);
+
+  // 負のローブ: 平坦部で強く (0.5)、エッジで弱く (0.21)
+  float lob = 0.5 + (0.25 - 0.04 - 0.5) * len;
+  float clp = 1.0 / lob;
+
+  vec3 acc = vec3(0.0);
+  float aw = 0.0;
+  accumulateTap(acc, aw, vec2(0.0, -1.0) - f, dir, len2, lob, clp, sB);
+  accumulateTap(acc, aw, vec2(1.0, -1.0) - f, dir, len2, lob, clp, sC);
+  accumulateTap(acc, aw, vec2(-1.0, 0.0) - f, dir, len2, lob, clp, sE);
+  accumulateTap(acc, aw, vec2(0.0, 0.0) - f, dir, len2, lob, clp, sF);
+  accumulateTap(acc, aw, vec2(1.0, 0.0) - f, dir, len2, lob, clp, sG);
+  accumulateTap(acc, aw, vec2(2.0, 0.0) - f, dir, len2, lob, clp, sH);
+  accumulateTap(acc, aw, vec2(-1.0, 1.0) - f, dir, len2, lob, clp, sI);
+  accumulateTap(acc, aw, vec2(0.0, 1.0) - f, dir, len2, lob, clp, sJ);
+  accumulateTap(acc, aw, vec2(1.0, 1.0) - f, dir, len2, lob, clp, sK);
+  accumulateTap(acc, aw, vec2(2.0, 1.0) - f, dir, len2, lob, clp, sL);
+  accumulateTap(acc, aw, vec2(0.0, 2.0) - f, dir, len2, lob, clp, sN);
+  accumulateTap(acc, aw, vec2(1.0, 2.0) - f, dir, len2, lob, clp, sO);
+
+  acc /= aw;
+
+  // リンギング抑止: 最近傍 4 テクセル（f, g, j, k）の範囲に収める
+  vec3 mn4 = min(min(sF, sG), min(sJ, sK));
+  vec3 mx4 = max(max(sF, sG), max(sJ, sK));
+  return clamp(acc, mn4, mx4);
+}
+
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
 
-  if (uPerEye > 0.5) {
+  if (uEyeMode > 0.5) {
     // いま描いている目（GpuBackdrop と同じ判定）
     vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
     float side = dot(cameraPosition - uHeadPosition, right);
-    int eye = side >= 0.0 ? 1 : 0;
+    float eye = side >= 0.0 ? 1.0 : 0.0;
 
-    mat4 pv;
-    vec4 pp;
-    vec4 cp;
-    if (eye == 0) { pv = uPrevView0; pp = uPrevProj0; cp = uCurProj0; }
-    else { pv = uPrevView1; pp = uPrevProj1; cp = uCurProj1; }
+    vec2 uv0 = uv;
+    if (uPerEye > 0.5) {
+      mat4 pv;
+      vec4 pp;
+      vec4 cp;
+      if (eye < 0.5) { pv = uPrevView0; pp = uPrevProj0; cp = uCurProj0; }
+      else { pv = uPrevView1; pp = uPrevProj1; cp = uCurProj1; }
 
-    // 現在のピクセルの視線（view 空間、c = 1）
-    float sx1 = cp.x;
-    float sy1 = cp.y;
-    float ox1 = cp.z;
-    float oy1 = cp.w;
-    float ndcX = vUv.x * 2.0 - 1.0;
-    float ndcY = vUv.y * 2.0 - 1.0;
-    float a1 = (ndcX + ox1) / sx1;
-    float b1 = (ndcY + oy1) / sy1;
+      // 現在のピクセルの視線（view 空間、c = 1）
+      float sx1 = cp.x;
+      float sy1 = cp.y;
+      float ox1 = cp.z;
+      float oy1 = cp.w;
+      float ndcX = vUv.x * 2.0 - 1.0;
+      float ndcY = vUv.y * 2.0 - 1.0;
+      float a1 = (ndcX + ox1) / sx1;
+      float b1 = (ndcY + oy1) / sy1;
 
-    vec3 r1 = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
-    vec3 u1 = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
-    vec3 f1 = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
-    vec3 d = a1 * r1 + b1 * u1 + f1; // 視線のワールド方向
+      vec3 r1 = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+      vec3 u1 = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+      vec3 f1 = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+      vec3 d = a1 * r1 + b1 * u1 + f1; // 視線のワールド方向
 
-    // 描画時の基底に射影し直す
-    vec3 r0 = vec3(pv[0][0], pv[1][0], pv[2][0]);
-    vec3 u0 = vec3(pv[0][1], pv[1][1], pv[2][1]);
-    vec3 f0 = -vec3(pv[0][2], pv[1][2], pv[2][2]);
-    float a0 = dot(d, r0);
-    float b0 = dot(d, u0);
-    float c0 = dot(d, f0);
-    float c = abs(c0) < 1e-5 ? 1e-5 : c0;
+      // 描画時の基底に射影し直す
+      vec3 r0 = vec3(pv[0][0], pv[1][0], pv[2][0]);
+      vec3 u0 = vec3(pv[0][1], pv[1][1], pv[2][1]);
+      vec3 f0 = -vec3(pv[0][2], pv[1][2], pv[2][2]);
+      float a0 = dot(d, r0);
+      float b0 = dot(d, u0);
+      float c0 = dot(d, f0);
+      float c = abs(c0) < 1e-5 ? 1e-5 : c0;
 
-    vec2 ndc0 = vec2(pp.x * a0 / c - pp.z, pp.y * b0 / c - pp.w);
-    vec2 uv0 = clamp(ndc0 * 0.5 + 0.5, 0.0, 1.0); // 目のタイル外は端で止める
-    uv = vec2(uv0.x, 1.0 - uv0.y);
-    uv.x = (float(eye) + uv.x) / uEyeCount;
+      vec2 ndc0 = vec2(pp.x * a0 / c - pp.z, pp.y * b0 / c - pp.w);
+      uv0 = clamp(ndc0 * 0.5 + 0.5, 0.0, 1.0); // 目のタイル外は端で止める
+    }
+
+    // sampleEye は下向きが +v なので、ここで反転して渡す
+    vec2 luv = vec2(uv0.x, 1.0 - uv0.y);
+    vec3 color = uEasu > 0.5 ? easu(luv, eye, uEyeTexel) : sampleEye(luv, eye);
+    gl_FragColor = vec4(linearToSRGB(color), 1.0);
+    return;
   }
 
   gl_FragColor = vec4(linearToSRGB(texture2D(uColor, uv).rgb), 1.0);
@@ -124,6 +273,8 @@ export interface ReprojectedBackdropProps {
   profile?: boolean
   /** 姿勢の再投影（XR のみ）。オフにすると素の GpuBackdrop と同じ */
   reproject?: boolean
+  /** XR で FSR1 の EASU を使って拡大する（既定 true） */
+  upscale?: boolean
   onReady?: (info: unknown) => void
   onError?: (message: string) => void
   onStats?: (stats: unknown) => void
@@ -152,6 +303,7 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
   debug = false,
   profile = false,
   reproject = true,
+  upscale = true,
   onReady,
   onError,
   onStats,
@@ -293,7 +445,10 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
         uniforms: {
           uColor: { value: null },
           uEyeCount: { value: 1 },
+          uEyeMode: { value: 0 },
           uPerEye: { value: 0 },
+          uEasu: { value: 0 },
+          uEyeTexel: { value: new Vector2(1 / 640, 1 / 640) },
           uHeadPosition: { value: new Vector3() },
           uPrevView0: { value: new Matrix4() },
           uPrevView1: { value: new Matrix4() },
@@ -348,8 +503,13 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
     const u = material.uniforms
     u.uColor.value = colorTexture
     u.uEyeCount.value = cameras.length
+    const eyeMode = presenting && cameras.length >= 2
+    u.uEyeMode.value = eyeMode ? 1 : 0
     // 再投影するのは「XR かつ 描画時の姿勢が記録済み」のときだけ
-    u.uPerEye.value = presenting && cameras.length >= 2 && reproject && hasPrev.current ? 1 : 0
+    u.uPerEye.value = eyeMode && reproject && hasPrev.current ? 1 : 0
+    // 拡大は常に XR のときだけ（モニタではほぼ 1:1 なので 12 タップの意味がない）
+    u.uEasu.value = eyeMode && upscale ? 1 : 0
+    u.uEyeTexel.value.set(1 / Math.max(1, resolution.width), 1 / Math.max(1, resolution.height))
     u.uHeadPosition.value.copy(headPosition)
     u.uPrevView0.value.copy(prevView[0])
     u.uPrevView1.value.copy(prevView[1])
@@ -370,6 +530,7 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
         presenting,
         cameras: cameras.length,
         perEye: u.uPerEye.value,
+        fsr: u.uEasu.value === 1,
         resolution: { ...resolution },
         maxWidth,
         xrAspect,

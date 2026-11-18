@@ -14,6 +14,8 @@ export interface AbyssalBackdropProps {
   /** 1 視点ぶんの描画解像度の上限（px） */
   maxWidth?: number
   maxFps?: number
+  /** XR の拡大に FSR1 EASU を使う（既定 true、`?fsr=0` で無効） */
+  upscale?: boolean
   debug?: boolean
 }
 
@@ -41,6 +43,7 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   quality,
   maxWidth,
   maxFps,
+  upscale,
   debug = false,
 }) => {
   const query = useMemo(() => new URLSearchParams(window.location.search), [])
@@ -72,6 +75,7 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   )
 
   const isDebug = debug || query.get('debug') === '1'
+  const resolvedUpscale = upscale ?? query.get('fsr') !== '0'
 
   // `?worker&inline` の worker は blob なので 1 ファイルにまとまって評価され、
   // engine.js は init メッセージより先に品質レベルを読む。そのため品質は
@@ -118,6 +122,8 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
       enabled={query.get('off') !== '1'}
       // 首振り時のブレを、描画時の姿勢へ再投影して補正する（?reproject=0 で無効）
       reproject={query.get('reproject') !== '0'}
+      // 640px/eye を目の解像度まで拡大するとき、バイリニアではなく EASU で拡大する
+      upscale={resolvedUpscale}
       debug={isDebug}
       profile={profile}
       onStats={onStats}
