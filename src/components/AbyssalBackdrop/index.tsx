@@ -1,6 +1,8 @@
-import { GpuBackdrop } from '@webxr-jp/webgpu-view'
-import { useCallback, useMemo } from 'react'
-import AbyssalWorker from '../../worker/abyssal.worker.ts?worker'
+import { useFrame, useThree } from '@react-three/fiber'
+import { useCallback, useMemo, useState } from 'react'
+import AbyssalWorker from '../../worker/abyssal.worker.ts?worker&inline'
+import { pickQuality } from '../../worker/quality'
+import { ReprojectedBackdrop } from './ReprojectedBackdrop'
 
 export interface AbyssalBackdropProps {
   /** 最初のフレーム（= ワールド生成完了）を受け取った */
@@ -43,6 +45,15 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
 }) => {
   const query = useMemo(() => new URLSearchParams(window.location.search), [])
 
+  // XR では 2 視点ぶんを 1 枚のアトラスに描くので、モニタと同じ解像度だと重すぎる。
+  // （PICO 4 Ultra: 1280/eye で 4fps → 640/eye で 15fps。320 まで下げても 18fps なので、
+  //   これ以上は解像度よりシーン側の固定コストが効く）
+  const gl = useThree((state) => state.gl)
+  const [xrPresenting, setXrPresenting] = useState(false)
+  useFrame(() => {
+    if (gl.xr.isPresenting !== xrPresenting) setXrPresenting(gl.xr.isPresenting)
+  })
+
   const resolvedQuality = useMemo(() => {
     if (typeof quality === 'number') return quality
     const raw = query.get('quality')
@@ -52,8 +63,8 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   }, [quality, query])
 
   const resolvedMaxWidth = useMemo(
-    () => maxWidth ?? queryNumber(query.get('maxWidth'), 1280),
-    [maxWidth, query],
+    () => maxWidth ?? queryNumber(query.get('maxWidth'), xrPresenting ? 640 : 1280),
+    [maxWidth, query, xrPresenting],
   )
   const resolvedMaxFps = useMemo(
     () => maxFps ?? queryNumber(query.get('maxFps'), 60),
@@ -61,6 +72,21 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   )
 
   const isDebug = debug || query.get('debug') === '1'
+
+  // `?worker&inline` の worker は blob なので 1 ファイルにまとまって評価され、
+  // engine.js は init メッセージより先に品質レベルを読む。そのため品質は
+  // Worker の `name` で渡す（`matchMedia` は Worker に無いのでここで決める）。
+  const resolvedFinalQuality = useMemo(
+    () => resolvedQuality ?? pickQuality(),
+    [resolvedQuality],
+  )
+  const WorkerClass = useMemo(() => {
+    const quality = resolvedFinalQuality
+    return function AbyssalWorkerWithQuality(options?: WorkerOptions) {
+      return new AbyssalWorker({ name: String(quality), ...options })
+    } as unknown as typeof AbyssalWorker
+  }, [resolvedFinalQuality])
+
   const workerData = useMemo(
     () => ({
       ...(resolvedQuality === undefined ? {} : { quality: resolvedQuality }),
@@ -80,8 +106,8 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   }, [onReady])
 
   return (
-    <GpuBackdrop
-      worker={AbyssalWorker}
+    <ReprojectedBackdrop
+      worker={WorkerClass}
       workerData={workerData}
       maxWidth={resolvedMaxWidth}
       maxFps={resolvedMaxFps}
@@ -90,6 +116,8 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
       // Worker は ImageBitmap で返す（buffer 経路は three の WebGPURenderer 前提のため使わない）
       transfer="bitmap"
       enabled={query.get('off') !== '1'}
+      // 首振り時のブレを、描画時の姿勢へ再投影して補正する（?reproject=0 で無効）
+      reproject={query.get('reproject') !== '0'}
       debug={isDebug}
       profile={profile}
       onStats={onStats}

@@ -14,7 +14,11 @@
 
 // ---------------------------------------------------------------- quality
 // LV: 0 High, 1 Medium, 2 Low (same meaning as upstream quality.js)
-const __Q = Number(globalThis.__ABYSSAL_QUALITY__ ?? 0);
+// The worker passes the level in `globalThis.__ABYSSAL_QUALITY__` before importing
+// this module. With an inline (blob) worker the whole bundle is evaluated at once,
+// so the level also comes in through the Worker `name` (set by AbyssalBackdrop).
+const __NAMED_Q = typeof self !== 'undefined' ? Number.parseInt(String(self.name ?? ''), 10) : NaN;
+const __Q = Number(globalThis.__ABYSSAL_QUALITY__ ?? (Number.isFinite(__NAMED_Q) ? __NAMED_Q : 0));
 const LV = __Q >= 2 ? 2 : __Q >= 1 ? 1 : 0;
 const THIN = 1 << LV, SHADOW = LV ? 2048 : 4096, AA = LV > 1 ? 1 : 4, WATER = LV > 1 ? 256 : 512, RAYN = LV > 1 ? 12 : 34;
 

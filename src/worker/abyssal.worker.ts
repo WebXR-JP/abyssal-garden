@@ -38,6 +38,8 @@ interface FrameMessage {
 
 type WorkerRequest = InitMessage | ResizeMessage | FrameMessage | { type: 'dispose' }
 
+import { pickQuality } from './quality'
+
 const scope = globalThis as unknown as {
   postMessage: (message: unknown, transfer?: Transferable[]) => void
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null
@@ -67,19 +69,17 @@ let frameCount = 0
 let debug = false
 
 /** Pick a quality level: 0 High, 1 Medium, 2 Low (same scale as upstream). */
-function pickQuality(explicit?: number) {
-  if (typeof explicit === 'number' && explicit >= 0) return Math.min(2, Math.floor(explicit))
-  const coarse = typeof matchMedia === 'function' ? matchMedia('(pointer:coarse)').matches : false
-  const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 8
-  if (coarse) return mem > 7 ? 1 : 2
-  return mem <= 4 ? 2 : 0
+function pickQualityFromName() {
+  const name = String((globalThis as unknown as { name?: string }).name ?? '')
+  const parsed = Number.parseInt(name, 10)
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(2, parsed)) : undefined
 }
 
 async function init(message: InitMessage) {
   initWidth = Math.max(64, Math.round(message.width))
   initHeight = Math.max(64, Math.round(message.height))
 
-  const quality = pickQuality(message.data?.quality)
+  const quality = pickQuality(message.data?.quality ?? pickQualityFromName())
   debug = message.data?.debug === true
   // engine.js reads this before it builds its shaders / world
   ;(globalThis as unknown as { __ABYSSAL_QUALITY__?: number }).__ABYSSAL_QUALITY__ = quality

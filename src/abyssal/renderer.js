@@ -72,7 +72,7 @@ const TANH = 0.6 // fallback tan(fov/2) when a projection cannot be read
 let TANX = TANH, TANY = TANH // tan half angles of the current view, for culling
 
 const F = new Float64Array(32)
-const CX = 0, CY = 1, CZ = 2, YAW = 3, PIT = 4, FX = 5, FY = 6, FZ = 7, RX = 8, RZ = 9, UX = 10, UY = 11, UZ = 12
+const CX = 0, CY = 1, CZ = 2, YAW = 3, PIT = 4, FX = 5, FY = 6, FZ = 7, RX = 8, RY = 13, RZ = 9, UX = 10, UY = 11, UZ = 12
 
 const mod = (device, code) => device.createShaderModule({ code })
 const colorAtt = (view, clear) => ({ view, loadOp: clear ? 'clear' : 'load', storeOp: 'store', clearValue: [0, 0, 0, 0] })
@@ -185,7 +185,9 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
   const pBub = scenePipe(mSpr, 'vsBub', 'fsBub', [ibBub], { strip: true, blend: { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } })
   const ADD = { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'one', dstFactor: 'one' } }
   const pSnow = scenePipe(mSpr, 'vsSnow', 'fsSnow', [ibSnow], { strip: true, blend: ADD })
-  const pGl = scenePipe(mLeaf, 'vsGl', 'fsGl', [ibBub], { strip: true, blend: ADD, constants: { ROWS: 7 } })
+  // ROWS は vs だけが使う override。vsGl に渡すと Dawn が
+  // "Pipeline overridable constant \"ROWS\" not found" でパイプラインを無効化する端末がある（PICO 4 Ultra）
+  const pGl = scenePipe(mLeaf, 'vsGl', 'fsGl', [ibBub], { strip: true, blend: ADD })
   const pSolidSh = shadowPipe(mSolid, 'vs', [vbSolid, ibSolid]), pTerrSh = shadowPipe(mSolid, 'vs', [vbSolid, ibSolid], { cull: 'front' })
   const pLeafSh = shadowPipe(mLeaf, 'vs', [ibLeaf], { strip: true, constants: { ROWS: 3 } })
 
@@ -451,7 +453,7 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
   // Draws the cells of a cell-sorted buffer that are in view and within [minD, maxD)
   // (scaled by `det`, but not for the terrain) as merged runs, nearest rows first.
   function drawCells(r, start, lo, hi, mar, indexed, verts, minD, maxD) {
-    const cx = F[CX], cy = F[CY], cz = F[CZ], fx = F[FX], fy = F[FY], fz = F[FZ], rx = F[RX], rz = F[RZ], ux = F[UX], uy = F[UY], uz = F[UZ]
+    const cx = F[CX], cy = F[CY], cz = F[CZ], fx = F[FX], fy = F[FY], fz = F[FZ], rx = F[RX], ry = F[RY], rz = F[RZ], ux = F[UX], uy = F[UY], uz = F[UZ]
     const ds = indexed === 1 ? 1 : det * det
     const tx = TANX, hw = CELLW * 0.5, ex = hw + mar, min2 = minD * minD * ds, max2 = maxD * maxD * ds
     for (let k = 0; k < CELLS; k++) {
@@ -465,7 +467,7 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
             const px = OX + (x + 0.5) * CELLW - cx, py = (l + h) * 0.5 - cy, ey = (h - l) * 0.5 + mar, hx = max(abs(px) - hw, 0), h2 = hx * hx + hz * hz
             if (h2 < max2 && h2 >= min2) {
               const lim = px * fx + py * fy + pz * fz + ex * abs(fx) + ey * abs(fy) + ex * abs(fz)
-              if (lim >= 0 && abs(px * rx + pz * rz) - ex * (abs(rx) + abs(rz)) <= lim * tx) v = abs(px * ux + py * uy + pz * uz) - ex * (abs(ux) + abs(uz)) - ey * abs(uy) <= lim * TANY
+              if (lim >= 0 && abs(px * rx + py * ry + pz * rz) - (ex * (abs(rx) + abs(rz)) + ey * abs(ry)) <= lim * tx) v = abs(px * ux + py * uy + pz * uz) - ex * (abs(ux) + abs(uz)) - ey * abs(uy) <= lim * TANY
             }
           }
         }
@@ -515,11 +517,15 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
     if (rad > 140) { F[CX] *= 140 / rad; F[CZ] *= 140 / rad }
     pushOut()
 
-    const cp = cos(pitch), rx = cos(yw), rz = sin(yw)
-    const ffx = cp * rz, ffy = sin(pitch), ffz = -cp * rx
-    const ux = -rz * ffy, uy = rz * ffx - rx * ffz, uz = rx * ffy
-    F[FX] = ffx; F[FY] = ffy; F[FZ] = ffz; F[RX] = rx; F[RZ] = rz
-    F[UX] = ux; F[UY] = uy; F[UZ] = uz
+    // カメラ基底は view 行列からそのまま使う（ロールも含む）。yaw/pitch に落とすと
+    // 頭を傾けたときにワールドの上方向が頭に貼り付いてしまう。
+    // ワールドの初期向き合わせ（yawOffset）だけを Y 軸回転で掛ける。
+    const rxv = r0, ryv = r1, rzv = r2
+    const uxv = u0, uyv = u1, uzv = u2
+    const fxv = -b0, fyv = -b1, fzv = -b2
+    F[RX] = rxv * cs - rzv * sn; F[RY] = ryv; F[RZ] = rxv * sn + rzv * cs
+    F[UX] = uxv * cs - uzv * sn; F[UY] = uyv; F[UZ] = uxv * sn + uzv * cs
+    F[FX] = fxv * cs - fzv * sn; F[FY] = fyv; F[FZ] = fxv * sn + fzv * cs
 
     const sx = projection[0] || 1 / TANH
     const sy = projection[5] || 1 / TANH
@@ -534,15 +540,15 @@ export async function createAbyssalRenderer({ canvas, width, height, onProgress 
     const { sx, sy, ox, oy } = proj
     const m = UB[n]
     const cx = F[CX], cy = F[CY], cz = F[CZ]
-    const rx = F[RX], rz = F[RZ], ux = F[UX], uy = F[UY], uz = F[UZ], fx = F[FX], fy = F[FY], fz = F[FZ]
+    const rx = F[RX], ry = F[RY], rz = F[RZ], ux = F[UX], uy = F[UY], uz = F[UZ], fx = F[FX], fy = F[FY], fz = F[FZ]
     // reverse-Z infinite projection (same depth convention as upstream), plus
     // the off-centre terms of an asymmetric (XR) projection
-    m[0] = rx * sx - fx * ox; m[4] = -fy * ox; m[8] = rz * sx - fz * ox; m[12] = -(rx * cx + rz * cz) * sx + (fx * cx + fy * cy + fz * cz) * ox
+    m[0] = rx * sx - fx * ox; m[4] = ry * sx - fy * ox; m[8] = rz * sx - fz * ox; m[12] = -(rx * cx + ry * cy + rz * cz) * sx + (fx * cx + fy * cy + fz * cz) * ox
     m[1] = ux * sy - fx * oy; m[5] = uy * sy - fy * oy; m[9] = uz * sy - fz * oy; m[13] = -(ux * cx + uy * cy + uz * cz) * sy + (fx * cx + fy * cy + fz * cz) * oy
     m[2] = 0; m[6] = 0; m[10] = 0; m[14] = NEAR
     m[3] = fx; m[7] = fy; m[11] = fz; m[15] = -(fx * cx + fy * cy + fz * cz)
     m[32] = cx; m[33] = cy; m[34] = cz; m[35] = time
-    m[36] = rx; m[37] = 0; m[38] = rz; m[39] = 1 / sx
+    m[36] = rx; m[37] = ry; m[38] = rz; m[39] = 1 / sx
     m[40] = ux; m[41] = uy; m[42] = uz; m[43] = 1 / sy
     m[44] = fx; m[45] = fy; m[46] = fz; m[47] = NEAR
     const zx = cx - PURPLE[0], zz = cz - PURPLE[1]

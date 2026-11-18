@@ -87,12 +87,16 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 ブラウザは **WebGPU が使える Chrome / Edge** が必要です。
 `npm run dev` は `http://localhost` なので secure context の条件を満たします。
 
+ヘッドセットで試すときは `npm run dev -- --host` で LAN に公開し（HTTPS になります）、
+実機のブラウザで `https://<PCのIP>:5173/` を開いて右上の **Enter VR** を押します。
+自己署名証明書の警告は一度許可してください。
+
 ### デバッグ用の URL クエリ
 
 | クエリ | 意味 |
 | --- | --- |
 | `?quality=0` / `1` / `2` | High / Medium / Low（未指定は端末から自動） |
-| `?maxWidth=960` | 1 視点ぶんの描画解像度の上限（既定 1280） |
+| `?maxWidth=960` | 1 視点ぶんの描画解像度の上限（既定 モニタ 1280 / XR 640） |
 | `?maxFps=30` | Worker の最大描画頻度（既定 60） |
 | `?debug=1` | ready / fps をコンソールに出す |
 | `?profile=1` | 1 秒ごとの描画統計（`[abyssal] stats {...}`） |
@@ -106,16 +110,22 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   移動・回転に応じて海中の視点は動きますが、立体視の奥行きは画像 1 枚ぶんです。
   メインシーンとピクセル単位で合成したい場合は
   `@webxr-jp/webgpu-view/experimental` の `DepthComposite` があります（XR 非対応）。
-- **VR は未検証です。** ローカルの `DevEnvironment` には Enter VR が無いため、
-  ヘッドセットでの表示は未確認です。左右 2 視点（アトラス）の描画は
-  `?stereo=1` でモニタ上に SBS 表示して確認できます。
-  実機で確認するときは XRift にアップロードして Enter VR してください。
+- **VR はローカルでも確認できます。** `npm run dev -- --host` で開いたページの右上に
+  「Enter VR」ボタンがあります（`src/components/EnterVrButton`）。本番ビルドには入りません。
+  XR では左右 2 視点を 1 枚のアトラスに描くため、既定を Low + 640px/eye にしています
+  （`?quality=` / `?maxWidth=` で上書き可）。PICO 4 Ultra では 640/eye で 20fps 前後、
+  320/eye で 25〜30fps、描画距離 `det` が 0.5 まで落ちた状態での値です。
+  XR のフレーム間隔は「Worker の GPU 時間＋ImageBitmap の受け渡し」で決まり、
+  背景を止めると 72fps で回るので、重さはほぼ背景側です。
 - **効果音は入っていません。** 上流の Web Audio の音響（`source/src/audio.js`）は
   移植していません。
-- **Worker の URL は絶対パス**（`/abyssal.worker-<hash>.js`）です。
-  `@webxr-jp/webgpu-view` の `?worker` import がそう出力するためで、
-  ワールドをサブパスで配信する場合は `vite.config.ts` の `base` を合わせてください
-  （合わないと背景だけが出ません。メインのワールドは動きます）。
+- **Worker は blob（`?worker&inline`）で起動します。** XRift はワールドを
+  `assets.xrift.net`、ページを `app.xrift.net` で配信するため、別ファイルの Worker は
+  「別オリジン」として `SecurityError` になります（URL をサブパスに合わせても同じ）。
+  そこで `worker.rollupOptions.output.inlineDynamicImports` で 1 ファイルにまとめ、
+  blob から起動しています。このため `xrift.json` の `permissions.allowedCodeRules` に
+  `no-javascript-blob` と `no-network-without-permission` を宣言しています
+  （入室時に同意画面が出ます）。
 - 上流の「動的解像度」の代わりに、GPU 時間を見て描画距離 `det` を
   0.5〜1.0 で自動調整します（`[abyssal] gpu ... / draw distance ...`）。
   手元の Mac（Apple Silicon, Chrome）では High / 1280x938 で

@@ -28,6 +28,12 @@
       "gravity": 9.81,
       "allowInfiniteJump": true
     },
+    "permissions": {
+      "allowedCodeRules": [
+        "no-javascript-blob",
+        "no-network-without-permission"
+      ]
+    },
     "camera": {
       "near": 0.1,
       "far": 1000
