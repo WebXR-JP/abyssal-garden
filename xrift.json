@@ -2,7 +2,7 @@
   "world": {
     "distDir": "./dist",
     "title": "Abyssal Garden",
-    "description": "WebGPUで描く、泳げる海中世界。ケルプの森・光の筋・沈没船・マンタ。",
+    "description": "WebGPUで描く、泳げる海中世界。ケルプの森・光の筋・沈没船・マンタ。原作: Noniv/abyssal-garden (MIT) https://github.com/Noniv/abyssal-garden",
     "thumbnailPath": "thumbnail.png",
     "buildCommand": "npm run build",
     "ignore": [
