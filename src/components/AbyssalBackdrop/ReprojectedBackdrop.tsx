@@ -5,12 +5,14 @@ import {
   DoubleSide,
   Matrix4,
   type Mesh,
+  type Object3D,
   PerspectiveCamera,
   PlaneGeometry,
   ShaderMaterial,
   Vector3,
   Vector4,
 } from 'three'
+import { resolveViewMatrix, writeViewCamera } from './viewMatrix'
 
 const BACKDROP_RENDER_ORDER = -1e3
 
@@ -183,15 +185,20 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
   const hasPrev = useRef(false)
   const lastImage = useRef<unknown>(null)
 
+  // ワーカーへ渡すカメラ。XR の目は rig / XROrigin の子ではないので、
+  // ライブラリがこのカメラに `updateMatrixWorld()` を呼んでも姿勢が壊れないよう、
+  // 「ワールド姿勢をローカル姿勢として持つ」専用のカメラを作って渡す。
+  const workerCameras = useMemo(() => [new PerspectiveCamera(), new PerspectiveCamera()], [])
+  const tmpView = useMemo(() => new Matrix4(), [])
+
   const recordPose = useCallback(
-    (camera: Camera, index: number) => {
-      camera.updateMatrixWorld()
-      pendingView[index].copy(camera.matrixWorldInverse)
+    (camera: Camera, index: number, xrParent: Object3D | null) => {
+      pendingView[index].copy(resolveViewMatrix(camera, xrParent, tmpView))
       // renderer.js の setCamera が使う係数と同じ並び
       const p = camera.projectionMatrix.elements
       pendingProj[index].set(p[0] || 1, p[5] || 1, p[8] || 0, p[9] || 0)
     },
-    [pendingView, pendingProj],
+    [pendingView, pendingProj, tmpView],
   )
 
   /** 新しい画像が届いたら、その画像を描いた姿勢を「表示中の姿勢」にする */
@@ -212,19 +219,22 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
   const resolveCameras = useCallback(
     (state: FrameState, record: boolean): Camera[] => {
       const xrCamera = gl.xr.isPresenting ? gl.xr.getCamera() : null
+      // XR の目に親は無いので、実際に姿勢を掛ける相手は XR カメラの親
+      // （XRift 本番の XROrigin / dev の rig）
+      const xrParent = (xrCamera?.parent as Object3D | null) ?? null
       if (xrCamera && xrCamera.cameras.length >= 2) {
         const eyes = xrCamera.cameras as unknown as Camera[]
         headPosition
           .setFromMatrixPosition(eyes[0].matrixWorld)
           .add(tmpVector.setFromMatrixPosition(eyes[1].matrixWorld))
           .multiplyScalar(0.5)
-        if (record) eyes.forEach(recordPose)
+        if (record) eyes.forEach((eye, index) => recordPose(eye, index, xrParent))
         return eyes
       }
       const main = state.camera
       if (!stereo) {
         headPosition.setFromMatrixPosition(main.matrixWorld)
-        if (record) recordPose(main, 0)
+        if (record) recordPose(main, 0, xrParent)
         return [main]
       }
       rightVector.setFromMatrixColumn(main.matrixWorld, 0).normalize()
@@ -235,7 +245,7 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
           .copy(center)
           .addScaledVector(rightVector, index === 0 ? -eyeSeparation / 2 : eyeSeparation / 2)
         eye.updateMatrixWorld()
-        if (record) recordPose(eye, index)
+        if (record) recordPose(eye, index, null)
       })
       headPosition.copy(center)
       return eyeCameras
@@ -243,9 +253,21 @@ export const ReprojectedBackdrop: React.FC<ReprojectedBackdropProps> = ({
     [gl, stereo, eyeSeparation, eyeCameras, headPosition, rightVector, tmpVector, recordPose],
   )
 
+  /**
+   * `getViewCameras` は戻り値に `updateMatrixWorld()` を呼ぶ。XR の目の
+   * matrixWorld は rig 抜きで上書きされてしまうので、ワールド姿勢を
+   * ローカル姿勢として持つ専用カメラを返す。
+   */
   const getViewsForWorker = useCallback(
-    (state: FrameState) => resolveCameras(state, true),
-    [resolveCameras],
+    (state: FrameState) => {
+      const cameras = resolveCameras(state, true)
+      const xrCamera = gl.xr.isPresenting ? gl.xr.getCamera() : null
+      const xrParent = (xrCamera?.parent as Object3D | null) ?? null
+      return cameras.map((camera, index) =>
+        writeViewCamera(workerCameras[index], camera, xrParent, tmpView),
+      )
+    },
+    [gl, resolveCameras, workerCameras, tmpView],
   )
 
   const { colorTexture, hasFrame } = useGpuWorker({

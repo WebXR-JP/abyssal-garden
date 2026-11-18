@@ -9,6 +9,7 @@ import { DevEnvironment, XRiftProvider } from '@xrift/world-components'
 import type { CameraConfig, PhysicsConfig } from '@xrift/world-components'
 import { createRoot } from 'react-dom/client'
 import { EnterVrButton } from './components/EnterVrButton'
+import { VrLocomotion } from './components/VrLocomotion'
 import { World } from './World'
 import xriftConfig from '../xrift.json'
 
@@ -29,8 +30,9 @@ createRoot(rootElement).render(
       outputBufferType={worldConfig.outputBufferType}
     >
       <World />
-      {/* ローカルで実機 VR を確認するためのボタン（本番ビルドには入らない） */}
+      {/* ローカルで実機 VR を確認するためのボタンと移動（本番ビルドには入らない） */}
       <EnterVrButton />
+      <VrLocomotion />
     </DevEnvironment>
   </XRiftProvider>,
 )

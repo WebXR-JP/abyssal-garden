@@ -85,7 +85,7 @@ export const World: React.FC<WorldProps> = ({ position = [0, 0, 0], scale = 1 })
                 <p style={{ margin: 0, opacity: 0.7, maxWidth: '30em', lineHeight: 1.6 }}>
                   海の底を彫って、ケルプを育てています。
                   <br />
-                  WASD で歩くと景色が動きます。
+                  WASD / スティックで動くと景色が動きます。
                 </p>
                 <p style={{ margin: 0, opacity: 0.4, fontSize: '0.8rem' }}>
                   Abyssal Garden by Noniv (MIT) · WebGPU via @webxr-jp/webgpu-view

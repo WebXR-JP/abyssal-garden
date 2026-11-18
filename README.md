@@ -41,7 +41,8 @@ src/
 ├── worker/
 │   └── abyssal.worker.ts # webgpu-view の Worker プロトコル（init/resize/frame/dispose）
 ├── components/
-│   └── AbyssalBackdrop/  # GpuBackdrop のラッパー
+│   ├── AbyssalBackdrop/  # GpuBackdrop のラッパー
+│   └── VrLocomotion/     # ローカル開発用の VR 移動（本番は XRift 側が動かす）
 ├── World.tsx             # スポーン・見えない床・読み込み表示
 └── dev.tsx               # ローカル開発用エントリ
 ```
@@ -105,6 +106,34 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 | `?profile=1` | 1 秒ごとの描画統計（`[abyssal] stats {...}`） |
 | `?off=1` | 背景を止める（切り分け用。ワールド生成は走る） |
 | `?stereo=1` | モニタでも左右 2 視点（アトラスの確認用） |
+| `?vrDebug=1` | dev の VR rig を `window.__vrRig` で外から動かせる（姿勢の切り分け用） |
+
+## VR の操作
+
+| 入力 | 動作 |
+| --- | --- |
+| 左スティック | 移動（5 m/s、倒しきると 7.5 m/s） |
+| 右スティック | 旋回（1.2 rad/s） |
+| 頭（HMD） | 見回し（room-scale の歩行もそのまま） |
+
+本番の XRift は、VR 中のプレイヤーを `kinematicPosition` の RigidBody で動かし、
+その子に `XROrigin` を置いています（`xrift-frontend` の `LocalPlayerCore` の
+`{isInVR && children}`）。なのでスティックで体が動けば視点も一緒に動きます。
+
+一方、ローカル開発の `DevEnvironment` には VR 用の入力・移動がありません
+（キーボードの WASD だけ）。`npm run dev -- --host` → Enter VR でコントローラーが
+効かないのはこのためです。`src/components/VrLocomotion` が dev 用に同じ操作を
+用意しています（`dev.tsx` からのみ使うので本番ビルドには入りません）。
+
+- カメラの親が既にある場合（= 本番の `XROrigin`）は何もしないので、二重には動きません。
+- 移動速度・旋回速度は XRift の VR 入力（`WALK_SPEED` 5.0 / `DASH_SPEED` 7.5 /
+  旋回 1.2 rad/s）に合わせています。
+- 姿勢は `src/components/AbyssalBackdrop/viewMatrix.ts` で作っています。three の
+  XR の目は rig の子ではなく `updateCamera` が `matrixWorld` に rig を掛けるだけなので、
+  `updateMatrixWorld()` を呼ぶと rig 抜きに戻ります（`@webxr-jp/webgpu-view` は
+  `getViewCameras` の戻り値にこれを呼ぶ）。そのためワーカーには、ワールド姿勢を
+  ローカル姿勢として持つ専用カメラを渡しています。`?debug=1` の
+  `window.__abyssalBackdrop.correctionDeg` が常に小さい値なら一致しています。
 
 ## 制限
 
@@ -114,7 +143,8 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   メインシーンとピクセル単位で合成したい場合は
   `@webxr-jp/webgpu-view/experimental` の `DepthComposite` があります（XR 非対応）。
 - **VR はローカルでも確認できます。** `npm run dev -- --host` で開いたページの右上に
-  「Enter VR」ボタンがあります（`src/components/EnterVrButton`）。本番ビルドには入りません。
+  「Enter VR」ボタンがあり（`src/components/EnterVrButton`）、VR 中の移動は
+  `src/components/VrLocomotion` が受け持ちます。どちらも本番ビルドには入りません。
   XR では左右 2 視点を 1 枚のアトラスに描くため、既定を Low + 640px/eye にしています
   （`?quality=` / `?maxWidth=` で上書き可）。PICO 4 Ultra では 640/eye で 20fps 前後、
   320/eye で 25〜30fps、描画距離 `det` が 0.5 まで落ちた状態での値です。
