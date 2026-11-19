@@ -1,4 +1,4 @@
-import { useFrame, useThree } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { Interactable } from '@xrift/world-components'
 import { useEffect, useMemo, useRef } from 'react'
 import { CanvasTexture, type Group, Quaternion, SRGBColorSpace, Vector3 } from 'three'
@@ -7,7 +7,6 @@ import { CanvasTexture, type Group, Quaternion, SRGBColorSpace, Vector3 } from '
 const W = 0.3
 const H = 0.075
 const DIST = 0.62
-const DROP = 0.165
 const TEX_W = 1024
 const TEX_H = 256
 const SEGMENTS = 10
@@ -15,6 +14,10 @@ const SEGMENTS = 10
 /** 横方向の視野に対するパネルの角度（広い画面ではこの角度、狭い画面では視野の割合で縮む） */
 const TARGET_ANGLE = (22 * Math.PI) / 180
 const MAX_VIEW_FRACTION = 0.42
+
+/** 非 VR は右下に 70% で置く（視線の邪魔をしない） */
+const DESKTOP_SCALE = 0.7
+const EDGE = 0.09 // 画面端からの余白（画面の半分に対する割合）
 
 // パネル幅に対する各操作の位置（キャンバスと当たり判定で共有する）
 const MUTE_U = 0.065
@@ -134,11 +137,11 @@ function paint(ctx: CanvasRenderingContext2D, volume: number, muted: boolean) {
  * カメラに追従する音量 HUD。上流の水中音のマスター音量を操作する。
  *
  * 見た目は 1 枚のキャンバス（スピーカー / − / 10 段バー / ＋）で、当たり判定だけを
- * `Interactable` の透明な板で重ねている。`Interactable` は XRift のプラットフォームが
- * VR コントローラーのレイでも拾うので、モニタでもヘッドセットでも同じように押せる。
+ * `Interactable` の透明な板で重ねている。
  *
  * グループは `scene` 直下（`AbyssalAudio` が portal で置く）なので、ワールドの
  * ルートに position / scale が付いていても画面に対する位置は変わらない。
+ * モニタでは右下 70%。VR では押す手段がないので `AbyssalAudio` が出さない。
  */
 export const AbyssalAudioHud: React.FC<AbyssalAudioHudProps> = ({
   volume,
@@ -146,7 +149,6 @@ export const AbyssalAudioHud: React.FC<AbyssalAudioHudProps> = ({
   onVolumeChange,
   onMutedChange,
 }) => {
-  const gl = useThree((state) => state.gl)
   const group = useRef<Group>(null)
   const headPosition = useMemo(() => new Vector3(), [])
   const headQuaternion = useMemo(() => new Quaternion(), [])
@@ -172,24 +174,28 @@ export const AbyssalAudioHud: React.FC<AbyssalAudioHudProps> = ({
 
   useEffect(() => () => texture.dispose(), [texture])
 
-  // 頭（XR 中は XR カメラ）の姿勢に合わせ、視線の少し下・前方に置く。
-  // 幅は横方向の視野に合わせて縮める（縦長のウィンドウでも画面を覆わない）
+  // カメラ（= 頭）の姿勢に合わせて、右下に置く
   useFrame(({ camera, size }) => {
     const node = group.current
     if (!node) return
-    const head = gl.xr.isPresenting ? gl.xr.getCamera() : camera
-    headPosition.setFromMatrixPosition(head.matrixWorld)
-    headQuaternion.setFromRotationMatrix(head.matrixWorld)
+    headPosition.setFromMatrixPosition(camera.matrixWorld)
+    headQuaternion.setFromRotationMatrix(camera.matrixWorld)
     node.position.copy(headPosition)
     node.quaternion.copy(headQuaternion)
-    node.translateY(-DROP)
-    node.translateZ(-DIST)
 
-    const aspect = gl.xr.isPresenting ? 1 : size.width / Math.max(1, size.height)
     const fov = 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3
+    const aspect = size.width / Math.max(1, size.height)
     const hFov = 2 * Math.atan(Math.tan(fov / 2) * aspect)
     const angle = Math.min(TARGET_ANGLE, hFov * MAX_VIEW_FRACTION)
-    node.scale.setScalar((2 * DIST * Math.tan(angle / 2)) / W)
+    const scale = ((2 * DIST * Math.tan(angle / 2)) / W) * DESKTOP_SCALE
+    node.scale.setScalar(scale)
+
+    // 右下：視野の端から余白ぶん内側に、パネルの右端と下端を合わせる
+    const halfH = DIST * Math.tan(fov / 2)
+    const halfW = halfH * aspect
+    node.translateX(halfW * (1 - EDGE) - (W * scale) / 2)
+    node.translateY(-halfH * (1 - EDGE) + (H * scale) / 2)
+    node.translateZ(-DIST)
   })
 
   const changeVolume = (next: number) => {

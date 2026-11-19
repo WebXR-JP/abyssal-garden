@@ -141,7 +141,7 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 
 ## 音量 HUD
 
-画面下中央に、水中音の音量 HUD が浮かびます（頭の姿勢に追従し、視線の少し下）。
+画面の右下に、水中音の音量 HUD が浮かびます（頭の姿勢に追従）。
 
 | 操作 | 動作 |
 | --- | --- |
@@ -150,10 +150,13 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 | 10 段のバー | 押した段の音量へ（触るとミュート解除） |
 
 - 見た目は文字なしの CanvasTexture 1 枚（スピーカー・−・バー・＋）。当たり判定は
-  `Interactable` で、XRift のプラットフォームが VR コントローラーのレイも拾います。
+  `Interactable`（モニタではクロスヘアで押す）。
 - 音量とミュートは `localStorage`（`abyssal-garden:volume` / `abyssal-garden:muted`）に
   残るので、入り直しても同じ設定で始まります。
 - パネルの幅は横方向の視野に合わせて縮みます（縦長のウィンドウでも画面を覆いません）。
+  モニタでは右下に 70% の大きさで出ます。
+- **VR 中は HUD を出しません。** コントローラーで押す手段がないためで、音量は
+  HUD で最後に設定した値のまま鳴ります。
 - `?audio=0` のときは音も HUD も出ません。
 
 ## 制限
@@ -185,7 +188,7 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   タッチ（VR は入室）で作って再開します。`M` キーでミュート、`?audio=0` で無効。
   水中の視点はメインスレッドのカメラ位置を 10 Hz で渡していて（Worker の `F`
   配列の代わり）、移動が速いと水を切る音、深いと水面の音が変わります。音量は
-  上記「音量 HUD」と `M` キーで調整できます。
+  上記「音量 HUD」と `M` キーで調整できます（VR では HUD は出ません）。
 - **Worker は blob（`?worker&inline`）で起動します。** XRift はワールドを
   `assets.xrift.net`、ページを `app.xrift.net` で配信するため、別ファイルの Worker は
   「別オリジン」として `SecurityError` になります（URL をサブパスに合わせても同じ）。

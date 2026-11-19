@@ -41,13 +41,15 @@ function writeSetting(key: string, value: string) {
  *   `AudioContext` を作って再開する（上流と同じ）。マウント時にも一度試す
  * - 水中の視点（= メインスレッドのカメラ）を毎フレーム渡し、音側が 10 Hz で
  *   読む。泳ぐ速さで水を切る音、深さで水面の音が変わる
- * - 音量とミュートは HUD（`Interactable`）と `M` キーで操作し、localStorage に残す
+ * - 音量とミュートは HUD と `M` キーで操作し、localStorage に残す。HUD は
+ *   モニタ用で、VR 中はコントローラーで押す手段がないため出さない
  */
 export const AbyssalAudio: React.FC<AbyssalAudioProps> = ({ enabled = true, visible = false }) => {
   const query = useMemo(() => new URLSearchParams(window.location.search), [])
   const active = enabled && query.get('audio') !== '0'
   const scene = useThree((state) => state.scene)
   const gl = useThree((state) => state.gl)
+  const [xrPresenting, setXrPresenting] = useState(false)
 
   const initial = useMemo(() => {
     const stored = Number(readSetting(VOLUME_KEY, '1'))
@@ -127,13 +129,15 @@ export const AbyssalAudio: React.FC<AbyssalAudioProps> = ({ enabled = true, visi
   }, [audio, setVolume, setMuted])
 
   useFrame(({ camera }) => {
+    // VR 中は HUD を出さない（コントローラーで押す手段がないため）
+    if (gl.xr.isPresenting !== xrPresenting) setXrPresenting(gl.xr.isPresenting)
     // XRift の本番ではカメラはプレイヤーの RigidBody の子なので、ローカル座標ではなく
     // ワールド座標を使う（歩いた距離が rush に出る）
     camera.getWorldPosition(position)
     audio.setPosition(position.x, position.y, position.z)
   })
 
-  if (!active || !visible) return null
+  if (!active || !visible || xrPresenting) return null
   return createPortal(
     <AbyssalAudioHud volume={volume} muted={muted} onVolumeChange={setVolume} onMutedChange={setMuted} />,
     scene,
