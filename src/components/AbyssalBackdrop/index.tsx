@@ -1,8 +1,8 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useMemo, useState } from 'react'
+import { GpuBackdrop } from '@webxr-jp/webgpu-view'
 import AbyssalWorker from '../../worker/abyssal.worker.ts?worker&inline'
 import { pickQuality } from '../../worker/quality'
-import { ReprojectedBackdrop } from './ReprojectedBackdrop'
 
 export interface AbyssalBackdropProps {
   /** 最初のフレーム（= ワールド生成完了）を受け取った */
@@ -33,6 +33,7 @@ function queryNumber(value: string | null, fallback: number) {
  * `@webxr-jp/webgpu-view` の `GpuBackdrop` に任せる:
  * - モニタ: 画面全体を覆う板ポリ（常にメインシーンより奥）
  * - XR: 左右の目ぶんを 1 フレームで描いたアトラスを目ごとに表示
+ *   （0.2.1 以降は首振りの遅延を回転で再投影し、拡大は FSR1 EASU）
  *
  * Worker には XRift のカメラ行列が毎フレーム渡り、その位置・向きから
  * 海中のカメラを動かす（歩くと景色が動く）。
@@ -110,7 +111,7 @@ export const AbyssalBackdrop: React.FC<AbyssalBackdropProps> = ({
   }, [onReady])
 
   return (
-    <ReprojectedBackdrop
+    <GpuBackdrop
       worker={WorkerClass}
       workerData={workerData}
       maxWidth={resolvedMaxWidth}

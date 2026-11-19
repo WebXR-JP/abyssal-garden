@@ -105,6 +105,7 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 | `?maxWidth=960` | 1 視点ぶんの描画解像度の上限（既定 モニタ 1280 / XR 640） |
 | `?maxFps=30` | Worker の最大描画頻度（既定 60） |
 | `?fsr=0` | XR の拡大を FSR1 EASU からバイリニアに戻す（既定は EASU） |
+| `?reproject=0` | XR の首振りの再投影を無効にする（既定は有効） |
 | `?debug=1` | ready / fps をコンソールに出す |
 | `?profile=1` | 1 秒ごとの描画統計（`[abyssal] stats {...}`） |
 | `?off=1` | 背景を止める（切り分け用。ワールド生成は走る） |
@@ -132,12 +133,12 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
 - カメラの親が既にある場合（= 本番の `XROrigin`）は何もしないので、二重には動きません。
 - 移動速度・旋回速度は XRift の VR 入力（`WALK_SPEED` 5.0 / `DASH_SPEED` 7.5 /
   旋回 1.2 rad/s）に合わせています。
-- 姿勢は `src/components/AbyssalBackdrop/viewMatrix.ts` で作っています。three の
-  XR の目は rig の子ではなく `updateCamera` が `matrixWorld` に rig を掛けるだけなので、
-  `updateMatrixWorld()` を呼ぶと rig 抜きに戻ります（`@webxr-jp/webgpu-view` は
-  `getViewCameras` の戻り値にこれを呼ぶ）。そのためワーカーには、ワールド姿勢を
-  ローカル姿勢として持つ専用カメラを渡しています。`?debug=1` の
-  `window.__abyssalBackdrop.correctionDeg` が常に小さい値なら一致しています。
+- 姿勢は `@webxr-jp/webgpu-view` 0.2.1 以降が面倒を見ます。three の XR の目は
+  rig の子ではなく `updateCamera` が `matrixWorld` に rig を掛けるだけなので、
+  `updateMatrixWorld()` を呼ぶと rig 抜きに戻ります。ライブラリはこれを避けて
+  （XR の目カメラには `updateMatrixWorld()` を呼ばず `matrixWorldInverse` を
+  そのまま使う）ワールド姿勢をそのままワーカーへ送るので、dev の rig でも
+  本番の `XROrigin` でも追加のコードは不要です。
 
 ## 音量 HUD
 
@@ -175,11 +176,13 @@ npx xrift upload   # XRift にアップロード（要 xrift login）
   XR のフレーム間隔は「Worker の GPU 時間＋ImageBitmap の受け渡し」で決まり、
   背景を止めると 72fps で回るので、重さはほぼ背景側です。
 - **XR の拡大は FSR1 の EASU。** 640px/eye を目の解像度（2.5〜3.4 倍）まで拡大する
-  ときにバイリニアだと輪郭がぼやけるので、`ReprojectedBackdrop` のフラグメント
-  シェーダで EASU（12 タップのエッジ適応アップサンプル）をかけています。
-  three の `FSR1Node` は r184+ の TSL / WebGPURenderer 専用なので使えず、
-  EASU の部分だけを GLSL に移植したものです（`?fsr=0` でバイリニアに戻せる）。
+  ときにバイリニアだと輪郭がぼやけるので、`@webxr-jp/webgpu-view` 0.2.1+ の
+  `GpuBackdrop` が EASU（12 タップのエッジ適応アップサンプル）をかけています
+  （`upscale` props、`?fsr=0` でバイリニアに戻せる）。
   RCAS（2 パス目のシャープ）は入っていないので、輪郭の立ち方は EASU 単体のぶんです。
+- **XR の首振りは再投影で補正。** Worker の描画は 1 フレーム以上遅れて届くため、
+  `GpuBackdrop` が表示中の画像を「描いた姿勢 → いまの姿勢」の回転差でずらして
+  ブレを抑えます（`reproject` props、`?reproject=0` で無効）。
 - **効果音は上流のまま鳴ります。** `source/src/audio.js` をメインスレッド用に
   移植した `src/abyssal/audio.js` が、AudioBuffer をその場で作る手続き生成の
   水中音（ランブル・水面・水を切る音・ドローン・泡・チャイム・遠いクジラ）を

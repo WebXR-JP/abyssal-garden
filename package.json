@@ -53,7 +53,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@webxr-jp/webgpu-view": "^0.2.0",
+    "@webxr-jp/webgpu-view": "^0.2.1",
     "@xrift/world-components": "^0.66.0"
   }
 }
